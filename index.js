@@ -12,9 +12,6 @@ import admin from "firebase-admin";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
-
 const raw = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 // Remplacement des sauts de ligne échappés :
