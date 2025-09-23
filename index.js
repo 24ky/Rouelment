@@ -68,4 +68,65 @@ app.use(express.static(path.join(process.cwd(), "public")));
 
 // 🔄 Endpoint d'upload
 app.post("/upload", upload.single("file"), async (req, res) => {
-  i
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  const receivedAt = new Date().toISOString();
+  const originalName = req.file.originalname;
+  const storedAs = req.file.filename;
+
+  try {
+    // Mise à jour du fichier metadata.json
+    const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
+    meta.push({ originalName, storedAs, receivedAt });
+    fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2), "utf8");
+
+    // Envoi notification push à tous les utilisateurs
+    await sendNotificationToAll(
+      "Nouveau fichier reçu",
+      `Fichier "${originalName}" uploadé avec succès`
+    );
+
+    // Notification socket.io aux clients connectés
+    io.emit("fileUploaded", { originalName, storedAs, receivedAt });
+
+    return res.json({ message: "File uploaded successfully", originalName, storedAs, receivedAt });
+  } catch (error) {
+    console.error("Upload error:", error);
+    return res.status(500).json({ error: "Erreur serveur lors de l'upload" });
+  }
+});
+
+// 📜 Endpoint pour récupérer la liste des fichiers uploadés
+app.get("/files", (req, res) => {
+  try {
+    const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
+    meta.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+    res.json(meta);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Impossible de lire les métadonnées" });
+  }
+});
+
+// 📥 Endpoint pour télécharger un fichier
+app.get("/download/:filename", (req, res) => {
+  const filename = req.params.filename;
+  if (filename.includes("..")) return res.status(400).send("Nom de fichier invalide");
+  const filePath = path.join(UPLOAD_DIR, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).send("Fichier non trouvé");
+  res.download(filePath);
+});
+
+// 🔌 Gestion des connexions socket.io
+io.on("connection", (socket) => {
+  console.log("Socket connecté :", socket.id);
+  socket.on("disconnect", () => {
+    console.log("Socket déconnecté :", socket.id);
+  });
+});
+
+// 🚀 Démarrage du serveur HTTP
+httpServer.listen(PORT, () => {
+  console.log(`Serveur lancé sur le port ${PORT}`);
+});
+
