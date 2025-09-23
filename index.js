@@ -77,7 +77,9 @@ function fileFilter(req, file, cb) {
 const upload = multer({ storage, fileFilter });
 
 // 🧾 Statique
-app.use(express.static(path.join(process.cwd(), "public")));
+app.get('/', (req, res) => {
+  res.send('Serveur opérationnel');
+});
 
 // 🔄 Endpoint d'upload
 app.post("/upload", upload.single("file"), async (req, res) => {
