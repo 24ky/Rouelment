@@ -29,11 +29,6 @@ const PORT = process.env.PORT || 10000;
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 
-// Initialise Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
 // 📤 Fonction d’envoi de notification push à tous les utilisateurs
 async function sendNotificationToAll(title, body) {
   const message = {
