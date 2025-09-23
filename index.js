@@ -14,9 +14,20 @@ const __dirname = path.dirname(__filename);
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+
+const raw = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+// Remplacement des sauts de ligne échappés :
+if (raw.private_key) {
+  raw.private_key = raw.private_key.replace(/\\n/g, "\n");
+}
+
+// Initialise seulement s’il n’y a pas déjà d’instance
+if (!admin.getApps().length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(raw)
+  });
+}
 
 
 const app = express();
