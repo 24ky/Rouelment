@@ -1,14 +1,20 @@
-// index.js
 import express from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from 'url';
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import sanitize from "sanitize-filename";
 import admin from "firebase-admin";
-const serviceAccount = require("./firebase-service-account.json");
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const serviceAccount = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "firebase-service-account.json"), "utf8")
+);
 
 const app = express();
 app.use(cors());
@@ -20,7 +26,7 @@ const PORT = process.env.PORT || 10000;
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 
-// 📦 Initialiser Firebase Admin SDK
+// Initialise Firebase Admin
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
