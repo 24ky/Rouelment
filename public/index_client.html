@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Relay Client</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center py-10">
+
+  <div class="bg-white shadow rounded-xl p-8 w-full max-w-3xl">
+    <h2 class="text-2xl font-bold mb-6">Uploader un fichier</h2>
+
+    <div class="mb-6 flex items-center">
+      <input type="file" id="fileInput" class="hidden" multiple>
+      <label for="fileInput" class="cursor-pointer inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
+        Sélectionner un fichier
+      </label>
+      <button onclick="uploadFile()" class="ml-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+        Envoyer
+      </button>
+    </div>
+
+    <h3 class="text-xl font-semibold mb-4">📂 Liste des fichiers :</h3>
+    <ul id="fileList" class="space-y-2"></ul>
+  </div>
+
+  <script>
+    const SERVER_URL = ""; // vide = même serveur que le client
+
+    async function uploadFile() {
+      const fileInput = document.getElementById("fileInput");
+      if (!fileInput.files.length) return alert("Choisis un fichier !");
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      try {
+        const res = await fetch(`${SERVER_URL}/upload`, { method: "POST", body: formData });
+        const data = await res.json();
+        console.log("Réponse serveur :", data);
+        alert("Fichier envoyé avec succès !");
+        loadFiles();
+      } catch (err) {
+        console.error("Erreur lors de l’envoi :", err);
+        alert("Erreur lors de l’envoi du fichier.");
+      }
+    }
+
+    async function loadFiles() {
+      try {
+        const res = await fetch(`${SERVER_URL}/files`);
+        const files = await res.json();
+        const fileList = document.getElementById("fileList");
+        fileList.innerHTML = "";
+        files.forEach(file => {
+          const li = document.createElement("li");
+          li.className = "flex items-center justify-between bg-gray-50 p-2 rounded-md hover:bg-gray-100 transition-colors";
+          li.innerHTML = `
+            <span>${file.originalName}</span>
+            <a href="/download/${file.storedAs}" target="_blank" class="text-blue-600 hover:underline">Télécharger</a>
+          `;
+          fileList.appendChild(li);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    loadFiles();
+  </script>
+</body>
+</html>
