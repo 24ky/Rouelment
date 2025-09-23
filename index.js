@@ -2,30 +2,31 @@ import express from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import sanitize from "sanitize-filename";
+
 import admin from "firebase-admin";
+import { getApps } from "firebase-admin/app";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const raw = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-// Remplacement des sauts de ligne échappés :
+// Remplacement des sauts de ligne échappés dans la clé privée
 if (raw.private_key) {
   raw.private_key = raw.private_key.replace(/\\n/g, "\n");
 }
 
-// Initialise seulement s’il n’y a pas déjà d’instance
-if (!admin.getApps().length) {
+// Initialisation de Firebase Admin si ce n'est pas déjà fait
+if (!getApps().length) {
   admin.initializeApp({
-    credential: admin.credential.cert(raw)
+    credential: admin.credential.cert(raw),
   });
 }
-
 
 const app = express();
 app.use(cors());
@@ -41,7 +42,7 @@ const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 async function sendNotificationToAll(title, body) {
   const message = {
     topic: "allUsers", // tous ceux abonnés à ce topic via Firebasex
-    notification: { title, body }
+    notification: { title, body },
   };
 
   try {
@@ -63,7 +64,7 @@ const storage = multer.diskStorage({
     const original = sanitize(file.originalname);
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${original}`;
     cb(null, unique);
-  }
+  },
 });
 
 const allowedExt = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv"];
@@ -141,4 +142,3 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, () => {
   console.log(`Serveur lancé sur le port ${PORT}`);
 });
-
