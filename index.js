@@ -8,7 +8,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import sanitize from "sanitize-filename";
 import admin from "firebase-admin";
-import serviceAccount from "./firebase-service-account.json" assert { type: "json" }; // 🟡 Change ce nom si nécessaire
+const serviceAccount = require("./firebase-service-account.json");
 
 const app = express();
 app.use(cors());
