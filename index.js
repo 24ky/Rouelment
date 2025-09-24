@@ -98,7 +98,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     // Envoi notification push à tous les utilisateurs
     await sendNotificationToAll(
       "Nouveau fichier reçu",
-      `Fichier "${originalName}" uploadé avec succès`
+      `"${originalName}"`
     );
 
     // Notification socket.io aux clients connectés
