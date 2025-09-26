@@ -96,10 +96,15 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2), "utf8");
 
     // Envoi notification push à tous les utilisateurs
-    await sendNotificationToAll(
-      "Nouveau fichier reçu",
-      `"${originalName}"`
-    );
+await sendNotificationToAll(
+  "Nouveau fichier reçu",
+  `"${originalName}"`,
+  {
+    originalName,
+    storedAs,
+    receivedAt
+  }
+);
 
     // Notification socket.io aux clients connectés
     io.emit("fileUploaded", { originalName, storedAs, receivedAt });
