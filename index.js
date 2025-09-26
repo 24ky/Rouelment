@@ -39,10 +39,11 @@ const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 
 // 📤 Fonction d’envoi de notification push à tous les utilisateurs
-async function sendNotificationToAll(title, body) {
+async function sendNotificationToAll(title, body, fileData = null) {
   const message = {
-    topic: "allUsers", // tous ceux abonnés à ce topic via Firebasex
+    topic: "allUsers",
     notification: { title, body },
+    data: fileData ? { fileData: JSON.stringify(fileData) } : {},
   };
 
   try {
