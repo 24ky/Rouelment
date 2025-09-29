@@ -90,9 +90,11 @@ app.get("/ping", (req, res) => {
 
 // 🔒 Routes protégées par authentification Firebase
 
-app.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+app.post("/upload", verifyToken, upload.single("file"), (req, res) => {
+  console.log("req.file =", req.file);
+  console.log("req.body =", req.body);
+  
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
   const receivedAt = new Date().toISOString();
   const originalName = req.file.originalname;
   const storedAs = req.file.filename;
