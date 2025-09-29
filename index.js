@@ -10,6 +10,8 @@ import sanitize from "sanitize-filename";
 
 import admin from "firebase-admin";
 import { getApps } from "firebase-admin/app";
+import { authenticateToken } from "./middleware/auth.js";
+import secureRoutes from "./routes/secure.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,28 +32,13 @@ if (!getApps().length) {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {});
 
 const PORT = process.env.PORT || 10000;
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
-
-// 📤 Fonction d’envoi de notification push à tous les utilisateurs
-async function sendNotificationToAll(title, body, fileData = null) {
-  const message = {
-    topic: "allUsers",
-    notification: { title, body },
-    data: fileData ? { fileData: JSON.stringify(fileData) } : {},
-  };
-
-  try {
-    const response = await admin.messaging().send(message);
-    console.log("✅ Notification FCM envoyée :", response);
-  } catch (error) {
-    console.error("❌ Erreur FCM :", error.message);
-  }
-}
 
 // 📁 Assure les répertoires
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -76,17 +63,34 @@ function fileFilter(req, file, cb) {
 
 const upload = multer({ storage, fileFilter });
 
-// 🧾 Statique
-app.get('/', (req, res) => {
-  res.send('Serveur opérationnel');
+// 📤 Fonction d’envoi de notification push à tous les utilisateurs
+async function sendNotificationToAll(title, body, fileData = null) {
+  const message = {
+    topic: "allUsers",
+    notification: { title, body },
+    data: fileData ? { fileData: JSON.stringify(fileData) } : {},
+  };
+
+  try {
+    const response = await admin.messaging().send(message);
+    console.log("✅ Notification FCM envoyée :", response);
+  } catch (error) {
+    console.error("❌ Erreur FCM :", error.message);
+  }
+}
+
+// 🧾 Routes publiques simples
+app.get("/", (req, res) => {
+  res.send("Serveur opérationnel");
 });
 
-app.get('/ping', (req, res) => {
-  res.status(200).send('OK');
+app.get("/ping", (req, res) => {
+  res.status(200).send("OK");
 });
 
-// 🔄 Endpoint d'upload
-app.post("/upload", upload.single("file"), async (req, res) => {
+// 🔒 Routes protégées par authentification Firebase
+
+app.post("/upload", authenticateToken, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   const receivedAt = new Date().toISOString();
@@ -94,23 +98,16 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   const storedAs = req.file.filename;
 
   try {
-    // Mise à jour du fichier metadata.json
     const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
     meta.push({ originalName, storedAs, receivedAt });
     fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2), "utf8");
 
-    // Envoi notification push à tous les utilisateurs
-await sendNotificationToAll(
-  "Nouveau fichier reçu",
-  `"${originalName}"`,
-  {
-    originalName,
-    storedAs,
-    receivedAt
-  }
-);
+    await sendNotificationToAll(
+      "Nouveau fichier reçu",
+      `"${originalName}"`,
+      { originalName, storedAs, receivedAt }
+    );
 
-    // Notification socket.io aux clients connectés
     io.emit("fileUploaded", { originalName, storedAs, receivedAt });
 
     return res.json({ message: "File uploaded successfully", originalName, storedAs, receivedAt });
@@ -120,8 +117,7 @@ await sendNotificationToAll(
   }
 });
 
-// 📜 Endpoint pour récupérer la liste des fichiers uploadés
-app.get("/files", (req, res) => {
+app.get("/files", authenticateToken, (req, res) => {
   try {
     const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
     meta.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
@@ -132,14 +128,16 @@ app.get("/files", (req, res) => {
   }
 });
 
-// 📥 Endpoint pour télécharger un fichier
-app.get("/download/:filename", (req, res) => {
+app.get("/download/:filename", authenticateToken, (req, res) => {
   const filename = req.params.filename;
   if (filename.includes("..")) return res.status(400).send("Nom de fichier invalide");
   const filePath = path.join(UPLOAD_DIR, filename);
   if (!fs.existsSync(filePath)) return res.status(404).send("Fichier non trouvé");
   res.download(filePath);
 });
+
+// Utilisation de routes sécurisées supplémentaires
+app.use(secureRoutes);
 
 // 🔌 Gestion des connexions socket.io
 io.on("connection", (socket) => {
@@ -148,9 +146,6 @@ io.on("connection", (socket) => {
     console.log("Socket déconnecté :", socket.id);
   });
 });
-
-import secureRoutes from "./routes/secure.js";
-app.use(secureRoutes);
 
 // 🚀 Démarrage du serveur HTTP
 httpServer.listen(PORT, () => {
