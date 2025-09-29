@@ -36,7 +36,7 @@ app.use(express.json());
 const httpServer = createServer(app);
 const io = new Server(httpServer, {});
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT;
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 
