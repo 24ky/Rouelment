@@ -130,7 +130,7 @@ app.get("/files", (req, res) => {
   }
 });
 
-app.get("/download/:filename", verifyToken, (req, res) => {
+app.get("/download/:filename", (req, res) => {
   const filename = req.params.filename;
   if (filename.includes("..")) return res.status(400).send("Nom de fichier invalide");
   const filePath = path.join(UPLOAD_DIR, filename);
