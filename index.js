@@ -149,6 +149,9 @@ io.on("connection", (socket) => {
   });
 });
 
+import secureRoutes from "./routes/secure.js";
+app.use(secureRoutes);
+
 // 🚀 Démarrage du serveur HTTP
 httpServer.listen(PORT, () => {
   console.log(`Serveur lancé sur le port ${PORT}`);
