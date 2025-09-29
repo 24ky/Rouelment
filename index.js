@@ -90,7 +90,7 @@ app.get("/ping", (req, res) => {
 
 // 🔒 Routes protégées par authentification Firebase
 
-app.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+app.post("/upload", upload.single("file"), async (req, res) => {
   console.log("req.file =", req.file);
   console.log("req.body =", req.body);
   
