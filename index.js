@@ -90,7 +90,7 @@ app.get("/ping", (req, res) => {
 
 // 🔒 Routes protégées par authentification Firebase
 
-app.post("/upload", authenticateToken, upload.single("file"), async (req, res) => {
+app.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   const receivedAt = new Date().toISOString();
@@ -117,7 +117,7 @@ app.post("/upload", authenticateToken, upload.single("file"), async (req, res) =
   }
 });
 
-app.get("/files", authenticateToken, (req, res) => {
+app.get("/files", verifyToken, (req, res) => {
   try {
     const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
     meta.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
@@ -128,7 +128,7 @@ app.get("/files", authenticateToken, (req, res) => {
   }
 });
 
-app.get("/download/:filename", authenticateToken, (req, res) => {
+app.get("/download/:filename", verifyToken, (req, res) => {
   const filename = req.params.filename;
   if (filename.includes("..")) return res.status(400).send("Nom de fichier invalide");
   const filePath = path.join(UPLOAD_DIR, filename);
