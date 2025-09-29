@@ -16,7 +16,6 @@ const __dirname = path.dirname(__filename);
 
 const raw = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-// Remplacement des sauts de ligne échappés dans la clé privée
 if (raw.private_key) {
   raw.private_key = raw.private_key.replace(/\\n/g, "\n");
 }
@@ -80,6 +79,10 @@ const upload = multer({ storage, fileFilter });
 // 🧾 Statique
 app.get('/', (req, res) => {
   res.send('Serveur opérationnel');
+});
+
+app.get('/ping', (req, res) => {
+  res.status(200).send('OK');
 });
 
 // 🔄 Endpoint d'upload
