@@ -119,7 +119,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.get("/files", verifyToken, (req, res) => {
+app.get("/files", (req, res) => {
   try {
     const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
     meta.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
