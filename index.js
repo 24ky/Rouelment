@@ -10,7 +10,7 @@ import sanitize from "sanitize-filename";
 
 import admin from "firebase-admin";
 import { getApps } from "firebase-admin/app";
-import { authenticateToken } from "./middleware/verifyToken.js";
+import { verifyToken } from "./middleware/verifyToken.js";
 import secureRoutes from "./routes/secure.js";
 
 const __filename = fileURLToPath(import.meta.url);
