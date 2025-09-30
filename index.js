@@ -136,9 +136,6 @@ app.get("/download/:filename", (req, res) => {
   res.download(filePath);
 });
 
-// Utilisation de routes sécurisées supplémentaires
-app.use(secureRoutes);
-
 // 🔌 Gestion des connexions socket.io
 io.on("connection", (socket) => {
   console.log("Socket connecté :", socket.id);
