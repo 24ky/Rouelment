@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dashboard Pings</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    #log { white-space: pre-wrap; background: #eee; padding: 1rem; border-radius: 4px; height: 300px; overflow-y: scroll; }
+  </style>
+</head>
+<body>
+  <h1>Dashboard Ping Serveurs</h1>
+  <div id="log">En attente de messages...</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const log = document.getElementById('log');
+    const socket = io();
+
+    function addLog(msg) {
+      log.textContent += msg + "\n";
+      log.scrollTop = log.scrollHeight;
+    }
+
+    addLog('Connexion au serveur...');
+
+    // Exemple : écoute des événements 'pingStatus' envoyés par le serveur
+    socket.on('pingStatus', data => {
+      addLog(`[${new Date().toLocaleTimeString()}] ${data}`);
+    });
+
+    socket.on('connect', () => {
+      addLog('Connecté au serveur socket');
+    });
+
+    socket.on('disconnect', () => {
+      addLog('Déconnecté du serveur socket');
+    });
+  </script>
+</body>
+</html>
