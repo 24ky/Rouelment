@@ -145,3 +145,24 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, () => {
   console.log(`Serveur lancé sur le port ${PORT}`);
 });
+// ================================
+// 🔁 PING DU SERVEUR B (keep alive)
+// ================================
+import axios from 'axios';
+
+const TARGET_SERVER = 'https://serveur-vt4p.onrender.com/ping';
+
+async function pingTargetServer() {
+  try {
+    const res = await axios.get(TARGET_SERVER);
+    console.log(`[${new Date().toISOString()}] ✅ Ping envoyé à ${TARGET_SERVER} - Status: ${res.status}`);
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] ❌ Erreur de ping vers ${TARGET_SERVER}:`, err.message);
+  }
+
+  const delay = Math.floor(Math.random() * (7 - 2 + 1) + 2) * 60 * 1000;
+  console.log(`🕒 Prochain ping dans ${(delay / 60000).toFixed(1)} minutes...`);
+  setTimeout(pingTargetServer, delay);
+}
+
+pingTargetServer();
