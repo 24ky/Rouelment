@@ -83,11 +83,6 @@ app.get('/ping', (req, res) => {
   res.status(200).send('OK');
 });
 
-
-app.get("/ping", (req, res) => {
-  res.status(200).send("OK");
-});
-
 // 🔒 Routes protégées par authentification Firebase
 
 app.post("/upload", upload.single("file"), async (req, res) => {
