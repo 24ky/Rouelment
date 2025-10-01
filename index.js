@@ -77,11 +77,13 @@ async function sendNotificationToAll(title, body, fileData = null) {
   }
 }
 
-// 🧾 Routes publiques simples
 app.get('/ping', (req, res) => {
-  console.log(`[${new Date().toISOString()}] 🔔 Ping reçu de la part de ${req.ip}`);
+  const msg = `🔔 Ping reçu de la part de ${req.ip}`;
+  console.log(`[${new Date().toISOString()}] ${msg}`);
+  io.emit('pingStatus', msg);  // 🟢 Envoie au dashboard
   res.status(200).send('OK');
 });
+
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard.html'));
