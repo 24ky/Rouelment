@@ -78,9 +78,11 @@ async function sendNotificationToAll(title, body, fileData = null) {
 }
 
 // 🧾 Routes publiques simples
-app.get("/", (req, res) => {
-  res.send("Serveur opérationnel");
+app.get('/ping', (req, res) => {
+  console.log(`[${new Date().toISOString()}] 🔔 Ping reçu de la part de ${req.ip}`);
+  res.status(200).send('OK');
 });
+
 
 app.get("/ping", (req, res) => {
   res.status(200).send("OK");
