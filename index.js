@@ -83,6 +83,10 @@ app.get('/ping', (req, res) => {
   res.status(200).send('OK');
 });
 
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dashboard.html'));
+});
+
 // 🔒 Routes protégées par authentification Firebase
 
 app.post("/upload", upload.single("file"), async (req, res) => {
@@ -155,13 +159,18 @@ const TARGET_SERVER = 'https://serveur-vt4p.onrender.com/ping';
 async function pingTargetServer() {
   try {
     const res = await axios.get(TARGET_SERVER);
-    console.log(`[${new Date().toISOString()}] ✅ Ping envoyé à ${TARGET_SERVER} - Status: ${res.status}`);
+    const msg = `✅ Ping envoyé à ${TARGET_SERVER} - Status: ${res.status}`;
+    console.log(`[${new Date().toISOString()}] ${msg}`);
+    io.emit('pingStatus', msg);
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] ❌ Erreur de ping vers ${TARGET_SERVER}:`, err.message);
+    const msg = `❌ Erreur de ping vers ${TARGET_SERVER}: ${err.message}`;
+    console.error(`[${new Date().toISOString()}] ${msg}`);
+    io.emit('pingStatus', msg);
   }
 
   const delay = Math.floor(Math.random() * (7 - 2 + 1) + 2) * 60 * 1000;
   console.log(`🕒 Prochain ping dans ${(delay / 60000).toFixed(1)} minutes...`);
+  io.emit('pingStatus', `🕒 Prochain ping dans ${(delay / 60000).toFixed(1)} minutes...`);
   setTimeout(pingTargetServer, delay);
 }
 
