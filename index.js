@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import fs from "fs";
+import fsPromises from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
@@ -10,6 +11,9 @@ import sanitize from "sanitize-filename";
 
 import admin from "firebase-admin";
 import { getApps } from "firebase-admin/app";
+
+import ImageKit from "imagekit";
+import axios from "axios";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,15 +38,22 @@ app.use(express.json());
 const httpServer = createServer(app);
 const io = new Server(httpServer, {});
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 
-// 📁 Assure les répertoires
+// --- Configuration ImageKit ---
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
+});
+
+// Assure les répertoires
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(META_FILE)) fs.writeFileSync(META_FILE, JSON.stringify([]));
 
-// 📂 Config Multer
+// Config Multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -61,7 +72,7 @@ function fileFilter(req, file, cb) {
 
 const upload = multer({ storage, fileFilter });
 
-// 📤 Fonction d’envoi de notification push à tous les utilisateurs
+// Fonction d’envoi de notification push à tous les utilisateurs
 async function sendNotificationToAll(title, body, fileData = null) {
   const message = {
     topic: "allUsers",
@@ -80,49 +91,60 @@ async function sendNotificationToAll(title, body, fileData = null) {
 app.get('/ping', (req, res) => {
   const msg = `🔔 Ping reçu de la part de ${req.ip}`;
   console.log(`[${new Date().toISOString()}] ${msg}`);
-  io.emit('pingStatus', msg);  // 🟢 Envoie au dashboard
+  io.emit('pingStatus', msg);
   res.status(200).send('OK');
 });
-
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
-// 🔒 Routes protégées par authentification Firebase
-
+// Route upload avec intégration ImageKit
 app.post("/upload", upload.single("file"), async (req, res) => {
-  console.log("req.file =", req.file);
-  console.log("req.body =", req.body);
-  
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  const receivedAt = new Date().toISOString();
-  const originalName = req.file.originalname;
-  const storedAs = req.file.filename;
-
   try {
-    const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
-    meta.push({ originalName, storedAs, receivedAt });
-    fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2), "utf8");
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const filePath = path.join(UPLOAD_DIR, req.file.filename);
+    const fileBuffer = await fsPromises.readFile(filePath);
+
+    // Upload sur ImageKit
+    const result = await imagekit.upload({
+      file: fileBuffer,
+      fileName: req.file.filename,
+      folder: "/uploads",
+    });
+
+    // Supprimer fichier local après upload
+    await fsPromises.unlink(filePath);
+
+    const receivedAt = new Date().toISOString();
+    const originalName = req.file.originalname;
+    const storedAs = req.file.filename;
+    const url = result.url;
+
+    const meta = JSON.parse(await fsPromises.readFile(META_FILE, "utf8"));
+    meta.push({ originalName, storedAs, url, receivedAt });
+    await fsPromises.writeFile(META_FILE, JSON.stringify(meta, null, 2), "utf8");
 
     await sendNotificationToAll(
       "Nouveau fichier reçu",
       `"${originalName}"`,
-      { originalName, storedAs, receivedAt }
+      { originalName, storedAs, url, receivedAt }
     );
 
-    io.emit("fileUploaded", { originalName, storedAs, receivedAt });
+    io.emit("fileUploaded", { originalName, storedAs, url, receivedAt });
 
-    return res.json({ message: "File uploaded successfully", originalName, storedAs, receivedAt });
+    return res.json({ message: "File uploaded successfully", originalName, storedAs, url, receivedAt });
   } catch (error) {
     console.error("Upload error:", error);
     return res.status(500).json({ error: "Erreur serveur lors de l'upload" });
   }
 });
 
-app.get("/files", (req, res) => {
+app.get("/files", async (req, res) => {
   try {
-    const meta = JSON.parse(fs.readFileSync(META_FILE, "utf8"));
+    const metaRaw = await fsPromises.readFile(META_FILE, "utf8");
+    const meta = JSON.parse(metaRaw);
     meta.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
     res.json(meta);
   } catch (err) {
@@ -131,15 +153,25 @@ app.get("/files", (req, res) => {
   }
 });
 
-app.get("/download/:filename", (req, res) => {
+app.get("/download/:filename", async (req, res) => {
   const filename = req.params.filename;
   if (filename.includes("..")) return res.status(400).send("Nom de fichier invalide");
-  const filePath = path.join(UPLOAD_DIR, filename);
-  if (!fs.existsSync(filePath)) return res.status(404).send("Fichier non trouvé");
-  res.download(filePath);
+
+  try {
+    const metaRaw = await fsPromises.readFile(META_FILE, "utf8");
+    const meta = JSON.parse(metaRaw);
+    const fileMeta = meta.find(f => f.storedAs === filename);
+    if (!fileMeta) return res.status(404).send("Fichier non trouvé");
+
+    // Redirection vers ImageKit
+    return res.redirect(fileMeta.url);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).send("Erreur serveur");
+  }
 });
 
-// 🔌 Gestion des connexions socket.io
+// Gestion des connexions socket.io
 io.on("connection", (socket) => {
   console.log("Socket connecté :", socket.id);
   socket.on("disconnect", () => {
@@ -147,15 +179,12 @@ io.on("connection", (socket) => {
   });
 });
 
-// 🚀 Démarrage du serveur HTTP
+// Démarrage du serveur HTTP
 httpServer.listen(PORT, () => {
   console.log(`Serveur lancé sur le port ${PORT}`);
 });
-// ================================
-// 🔁 PING DU SERVEUR B (keep alive)
-// ================================
-import axios from 'axios';
 
+// Ping serveur externe (keep alive)
 const TARGET_SERVER = 'https://serveur-vt4p.onrender.com/ping';
 
 async function pingTargetServer() {
