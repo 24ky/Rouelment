@@ -115,6 +115,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       originalName,
       storedAs,
       fileId: result.fileId,
+      filePath: result.filePath, // ✅ chemin correct vers le fichier
       receivedAt,
     });
 
@@ -148,15 +149,17 @@ app.get("/download/:filename", async (req, res) => {
   try {
     const snap = await db.collection("uploads").where("storedAs", "==", filename).limit(1).get();
     if (snap.empty) return res.status(404).send("Fichier non trouvé");
-    const { fileId, originalName } = snap.docs[0].data();
+
+    const { filePath, originalName } = snap.docs[0].data();
 
     const url = imagekit.url({
-      path: `/uploads/${fileId}`,
+      path: filePath, // ✅ Utiliser le vrai chemin
       expiresIn: 3600,
       responseHeaders: {
         "Content-Disposition": `attachment; filename="${originalName}"`,
       },
     });
+
     res.redirect(url);
   } catch (e) {
     console.error("Download error", e);
