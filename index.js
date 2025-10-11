@@ -11,6 +11,7 @@ import sanitize from "sanitize-filename";
 
 import admin from "firebase-admin";
 import { getApps } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 
 import ImageKit from "imagekit";
 import axios from "axios";
@@ -19,17 +20,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const raw = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+if (raw.private_key) raw.private_key = raw.private_key.replace(/\\n/g, "\n");
 
-if (raw.private_key) {
-  raw.private_key = raw.private_key.replace(/\\n/g, "\n");
-}
-
-// Initialisation de Firebase Admin si ce n'est pas déjà fait
 if (!getApps().length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(raw),
-  });
+  admin.initializeApp({ credential: admin.credential.cert(raw) });
 }
+const db = getFirestore();
 
 const app = express();
 app.use(cors());
@@ -40,24 +36,19 @@ const io = new Server(httpServer, {});
 
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
-const META_FILE = path.join(UPLOAD_DIR, "metadata.json");
 
-// --- Configuration ImageKit ---
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
 const imagekit = new ImageKit({
   publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
   privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
 });
 
-  if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
+if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
   throw new Error("Variables ImageKit manquantes !");
 }
 
-// Assure les répertoires
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-if (!fs.existsSync(META_FILE)) fs.writeFileSync(META_FILE, JSON.stringify([]));
-
-// Config Multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -76,14 +67,12 @@ function fileFilter(req, file, cb) {
 
 const upload = multer({ storage, fileFilter });
 
-// Fonction d’envoi de notification push à tous les utilisateurs
 async function sendNotificationToAll(title, body, fileData = null) {
   const message = {
     topic: "allUsers",
     notification: { title, body },
     data: fileData ? { fileData: JSON.stringify(fileData) } : {},
   };
-
   try {
     const response = await admin.messaging().send(message);
     console.log("✅ Notification FCM envoyée :", response);
@@ -103,94 +92,86 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
-// Route upload avec intégration ImageKit
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    if (!req.file) return res.status(400).json({ error: "Aucun fichier sélectionné." });
 
     const filePath = path.join(UPLOAD_DIR, req.file.filename);
     const fileBuffer = await fsPromises.readFile(filePath);
 
-    // Upload sur ImageKit
     const result = await imagekit.upload({
       file: fileBuffer,
       fileName: req.file.filename,
       folder: "/uploads",
     });
 
-    // Supprimer fichier local après upload
     await fsPromises.unlink(filePath);
 
     const receivedAt = new Date().toISOString();
     const originalName = req.file.originalname;
     const storedAs = req.file.filename;
-    const url = result.url;
 
-    const meta = JSON.parse(await fsPromises.readFile(META_FILE, "utf8"));
-    meta.push({ originalName, storedAs, url, receivedAt });
-    await fsPromises.writeFile(META_FILE, JSON.stringify(meta, null, 2), "utf8");
+    await db.collection("uploads").add({
+      originalName,
+      storedAs,
+      fileId: result.fileId,
+      receivedAt,
+    });
 
-    await sendNotificationToAll(
-      "Nouveau fichier reçu",
-      `"${originalName}"`,
-      { originalName, storedAs, url, receivedAt }
-    );
+    await sendNotificationToAll("Nouveau fichier reçu", `"${originalName}"`);
+    io.emit("fileUploaded", { originalName, storedAs, receivedAt });
 
-    io.emit("fileUploaded", { originalName, storedAs, url, receivedAt });
-
-    return res.json({ message: "File uploaded successfully", originalName, storedAs, url, receivedAt });
-  } catch (error) {
-    console.error("Upload error:", error);
-    return res.status(500).json({ error: "Erreur serveur lors de l'upload" });
+    res.json({ message: "Fichier envoyé ✅", originalName, storedAs, receivedAt });
+  } catch (err) {
+    console.error("Upload error:", err);
+    let msg = "Erreur serveur";
+    if (err.statusCode === 413) msg = "Fichier trop lourd (max ~25 MB).";
+    if (err.statusCode === 401) msg = "Clés ImageKit invalides.";
+    res.status(500).json({ error: msg });
   }
 });
 
 app.get("/files", async (req, res) => {
   try {
-    const metaRaw = await fsPromises.readFile(META_FILE, "utf8");
-    const meta = JSON.parse(metaRaw);
-    meta.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
-    res.json(meta);
+    const snap = await db.collection("uploads").orderBy("receivedAt", "desc").get();
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    res.json(list);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Impossible de lire les métadonnées" });
+    res.status(500).json({ error: "Impossible de lire les fichiers" });
   }
 });
 
 app.get("/download/:filename", async (req, res) => {
   const filename = req.params.filename;
-  if (filename.includes("..")) return res.status(400).send("Nom de fichier invalide");
-
+  if (filename.includes("..")) return res.status(400).send("Nom invalide");
   try {
-    const metaRaw = await fsPromises.readFile(META_FILE, "utf8");
-    const meta = JSON.parse(metaRaw);
-    const fileMeta = meta.find(f => f.storedAs === filename);
-    if (!fileMeta) return res.status(404).send("Fichier non trouvé");
+    const snap = await db.collection("uploads").where("storedAs", "==", filename).limit(1).get();
+    if (snap.empty) return res.status(404).send("Fichier non trouvé");
+    const { fileId, originalName } = snap.docs[0].data();
 
-    // Redirection vers ImageKit
-    return res.redirect(fileMeta.url);
-  } catch (error) {
-    console.error(error);
-    return res.status(500).send("Erreur serveur");
+    const url = imagekit.url({
+      path: `/uploads/${fileId}`,
+      expiresIn: 3600,
+      responseHeaders: {
+        "Content-Disposition": `attachment; filename="${originalName}"`,
+      },
+    });
+    res.redirect(url);
+  } catch (e) {
+    console.error("Download error", e);
+    res.status(500).send("Erreur serveur");
   }
 });
 
-// Gestion des connexions socket.io
 io.on("connection", (socket) => {
   console.log("Socket connecté :", socket.id);
-  socket.on("disconnect", () => {
-    console.log("Socket déconnecté :", socket.id);
-  });
+  socket.on("disconnect", () => console.log("Socket déconnecté :", socket.id));
 });
 
-// Démarrage du serveur HTTP
-httpServer.listen(PORT, () => {
-  console.log(`Serveur lancé sur le port ${PORT}`);
-});
+httpServer.listen(PORT, () => console.log(`Serveur lancé sur le port ${PORT}`));
 
-// Ping serveur externe (keep alive)
 const TARGET_SERVER = 'https://serveur-vt4p.onrender.com/ping';
-
 async function pingTargetServer() {
   try {
     const res = await axios.get(TARGET_SERVER);
@@ -202,11 +183,9 @@ async function pingTargetServer() {
     console.error(`[${new Date().toISOString()}] ${msg}`);
     io.emit('pingStatus', msg);
   }
-
   const delay = Math.floor(Math.random() * (7 - 2 + 1) + 2) * 60 * 1000;
   console.log(`🕒 Prochain ping dans ${(delay / 60000).toFixed(1)} minutes...`);
   io.emit('pingStatus', `🕒 Prochain ping dans ${(delay / 60000).toFixed(1)} minutes...`);
   setTimeout(pingTargetServer, delay);
 }
-
 pingTargetServer();
