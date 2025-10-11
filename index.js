@@ -164,6 +164,20 @@ app.get("/download/:filename", async (req, res) => {
   }
 });
 
+app.head("/exists/:filename", async (req, res) => {
+  const filename = req.params.filename;
+  if (filename.includes("..")) return res.status(400).send("Nom invalide");
+
+  try {
+    const snap = await db.collection("uploads").where("storedAs", "==", filename).limit(1).get();
+    if (snap.empty) return res.status(404).send("Non trouvé");
+    res.status(200).send("Existe");
+  } catch (e) {
+    console.error("Exists error", e);
+    res.status(500).send("Erreur serveur");
+  }
+});
+
 io.on("connection", (socket) => {
   console.log("Socket connecté :", socket.id);
   socket.on("disconnect", () => console.log("Socket déconnecté :", socket.id));
