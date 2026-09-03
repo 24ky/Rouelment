@@ -132,57 +132,103 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+// ✅ Endpoint /health - toujours accessible
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    firebase_initialized: !!admin.apps.length,
+    imagekit_configured: !!process.env.IMAGEKIT_PUBLIC_KEY,
+    upload_dir_exists: fs.existsSync(UPLOAD_DIR)
+  });
+});
+
+// ✅ Endpoint /files - avec fallback si Firestore échoue
 app.get("/files", async (req, res) => {
   try {
+    // Vérifier si Firestore est initialisé
+    if (!admin.apps.length || !db) {
+      console.warn('⚠️ Firestore non initialisé - retourne liste vide');
+      return res.json([]);
+    }
+    
     const snap = await db.collection("uploads").orderBy("receivedAt", "desc").get();
     const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     res.json(list);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Impossible de lire les fichiers" });
+    console.error('❌ Erreur /files:', err.message);
+    // En cas d'erreur, retourner une liste vide (pas d'erreur 500)
+    res.json([]);
   }
 });
 
+// ✅ Endpoint /download - avec fallback
 app.get("/download/:filename", async (req, res) => {
   const filename = req.params.filename;
-  console.log(`📥 Téléchargement demandé: ${filename}`);
-  
   if (filename.includes("..")) {
-    console.warn('⚠️ Tentative de chemin invalide:', filename);
     return res.status(400).send("Nom invalide");
   }
   
   try {
-    console.log(`🔍 Recherche du fichier: ${filename}`);
-    const snap = await db.collection("uploads").where("storedAs", "==", filename).limit(1).get();
+    if (!admin.apps.length || !db) {
+      console.warn('⚠️ Firestore non initialisé - retourne 404');
+      return res.status(404).send("Service non disponible");
+    }
     
+    const snap = await db.collection("uploads").where("storedAs", "==", filename).limit(1).get();
     if (snap.empty) {
-      console.warn(`⚠️ Fichier non trouvé: ${filename}`);
       return res.status(404).send("Fichier non trouvé");
     }
 
-    const data = snap.docs[0].data();
-    console.log(`📄 Fichier trouvé:`, {
-      originalName: data.originalName,
-      filePath: data.filePath,
-      fileId: data.fileId
-    });
+    const { filePath, originalName } = snap.docs[0].data();
+    
+    if (!process.env.IMAGEKIT_PUBLIC_KEY) {
+      // Fallback: retourner un message d'erreur
+      return res.status(503).send("Service de téléchargement non disponible");
+    }
 
-    // Utiliser fileId ou filePath
     const url = imagekit.url({
-      path: data.filePath || `/uploads/${data.storedAs}`,
+      path: filePath,
       expiresIn: 3600,
       responseHeaders: {
-        "Content-Disposition": `attachment; filename="${data.originalName || filename}"`,
+        "Content-Disposition": `attachment; filename="${originalName || filename}"`,
       },
     });
 
-    console.log(`🔗 URL générée: ${url}`);
     res.redirect(url);
-    
   } catch (e) {
-    console.error('❌ Erreur /download:', e);
-    res.status(500).send(`Erreur serveur: ${e.message}`);
+    console.error("Download error", e);
+    res.status(500).send("Erreur serveur");
+  }
+});
+
+// ✅ Endpoint /test-firestore
+app.get('/test-firestore', async (req, res) => {
+  try {
+    if (!admin.apps.length || !db) {
+      return res.status(503).json({ 
+        error: 'Firestore non initialisé',
+        firebase_initialized: !!admin.apps.length
+      });
+    }
+    
+    const testDoc = await db.collection('test').add({
+      timestamp: new Date().toISOString(),
+      message: 'Test Firestore'
+    });
+    
+    await db.collection('test').doc(testDoc.id).delete();
+    res.json({ 
+      success: true, 
+      message: 'Firestore fonctionne correctement',
+      testId: testDoc.id
+    });
+  } catch (error) {
+    console.error('❌ Erreur Firestore:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 
