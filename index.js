@@ -145,25 +145,44 @@ app.get("/files", async (req, res) => {
 
 app.get("/download/:filename", async (req, res) => {
   const filename = req.params.filename;
-  if (filename.includes("..")) return res.status(400).send("Nom invalide");
+  console.log(`📥 Téléchargement demandé: ${filename}`);
+  
+  if (filename.includes("..")) {
+    console.warn('⚠️ Tentative de chemin invalide:', filename);
+    return res.status(400).send("Nom invalide");
+  }
+  
   try {
+    console.log(`🔍 Recherche du fichier: ${filename}`);
     const snap = await db.collection("uploads").where("storedAs", "==", filename).limit(1).get();
-    if (snap.empty) return res.status(404).send("Fichier non trouvé");
+    
+    if (snap.empty) {
+      console.warn(`⚠️ Fichier non trouvé: ${filename}`);
+      return res.status(404).send("Fichier non trouvé");
+    }
 
-    const { filePath, originalName } = snap.docs[0].data();
+    const data = snap.docs[0].data();
+    console.log(`📄 Fichier trouvé:`, {
+      originalName: data.originalName,
+      filePath: data.filePath,
+      fileId: data.fileId
+    });
 
+    // Utiliser fileId ou filePath
     const url = imagekit.url({
-      path: filePath, // ✅ Utiliser le vrai chemin
+      path: data.filePath || `/uploads/${data.storedAs}`,
       expiresIn: 3600,
       responseHeaders: {
-        "Content-Disposition": `attachment; filename="${originalName}"`,
+        "Content-Disposition": `attachment; filename="${data.originalName || filename}"`,
       },
     });
 
+    console.log(`🔗 URL générée: ${url}`);
     res.redirect(url);
+    
   } catch (e) {
-    console.error("Download error", e);
-    res.status(500).send("Erreur serveur");
+    console.error('❌ Erreur /download:', e);
+    res.status(500).send(`Erreur serveur: ${e.message}`);
   }
 });
 
