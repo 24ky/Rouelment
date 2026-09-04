@@ -167,6 +167,40 @@ app.delete("/files/:id", async (req, res) => {
   }
 });
 
+// Dans index.js (serveur)
+app.delete("/files/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🗑️ Suppression du fichier: ${id}`);
+
+    // Vérifier que l'ID est valide
+    if (!id) {
+      return res.status(400).json({ error: "ID manquant" });
+    }
+
+    const result = await cloudinary.uploader.destroy(id, {
+      resource_type: "raw",
+    });
+
+    if (result.result === "ok") {
+      // 🔥 ÉMETTRE L'ÉVÉNEMENT À TOUS LES CLIENTS
+      io.emit("fileDeleted", { 
+        id: id,
+        timestamp: new Date().toISOString(),
+        deletedBy: req.ip || "unknown"
+      });
+      
+      res.json({ success: true, message: "Fichier supprimé" });
+    } else {
+      res.status(404).json({ error: "Fichier non trouvé" });
+    }
+
+  } catch (err) {
+    console.error("❌ Erreur suppression:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 📥 Télécharger un fichier (redirection Cloudinary)
 app.get("/download/:id", async (req, res) => {
   try {
