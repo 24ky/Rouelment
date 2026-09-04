@@ -1,5 +1,5 @@
 {
-  "name": "fichiers-serveur",
+  "name": "pcc-serveur",
   "version": "1.0.0",
   "description": "Serveur Express pour upload, download et notifications temps réel via Socket.io",
   "main": "index.js",
@@ -8,15 +8,17 @@
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
-"dependencies": {
-  "imagekit": "^6.0.0",
-  "axios": "^1.6.8",
+  "dependencies": {
+    "imagekit": "^6.0.0",
+    "axios": "^1.6.8",
+    "cloudinary": "^2.5.1",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "firebase-admin": "^13.5.0",
     "multer": "^1.4.5-lts.1",
     "sanitize-filename": "^1.6.3",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
