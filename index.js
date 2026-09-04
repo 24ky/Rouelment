@@ -66,7 +66,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// 📤 Upload fichier
+// 📤 Upload fichier - VERSION CORRIGÉE
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
@@ -79,14 +79,15 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     console.log(`📤 Upload en cours: ${originalName} (${fileSize} bytes)`);
 
-    // Upload vers Cloudinary
+    // 🔥 CORRECTION : Utiliser un ID sans préfixe "files/"
+    const uniqueId = `${Date.now()}-${uuidv4()}`;
+    
     const result = await cloudinary.uploader.upload(filePath, {
       resource_type: "raw",
-      public_id: `files/${Date.now()}-${uuidv4()}`,
+      public_id: uniqueId,  // ✅ Plus de préfixe "files/"
       display_name: originalName,
     });
 
-    // Supprimer le fichier temporaire
     fs.unlinkSync(filePath);
 
     const fileData = {
@@ -99,7 +100,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     console.log(`✅ Fichier uploadé: ${originalName} (${result.public_id})`);
 
-    // Notifier tous les clients connectés
     io.emit("fileUploaded", fileData);
 
     res.json({
@@ -114,7 +114,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// 📋 Liste des fichiers
+
+// 📋 Liste des fichiers - VERSION CORRIGÉE
 app.get("/files", async (req, res) => {
   try {
     console.log("📁 Récupération de la liste des fichiers...");
@@ -122,18 +123,26 @@ app.get("/files", async (req, res) => {
     const result = await cloudinary.api.resources({
       resource_type: "raw",
       type: "upload",
-      prefix: "files/",
-      max_results: 500,
+      max_results: 500,  // ✅ Plus de préfixe
     });
 
-    const files = result.resources.map(file => ({
-      id: file.public_id,
-      originalName: file.display_name || file.public_id.split("/").pop(),
-      fileSize: file.bytes,
-      url: file.secure_url,
-      createdAt: file.created_at,
-      format: file.format,
-    }));
+    const files = result.resources.map(file => {
+      // 🔥 Extraire l'ID sans le préfixe "files/" si présent
+      let cleanId = file.public_id;
+      if (cleanId.startsWith('files/')) {
+        cleanId = cleanId.replace('files/', '');
+      }
+      
+      return {
+        id: cleanId,
+        storedAs: cleanId,
+        originalName: file.display_name || file.public_id.split("/").pop(),
+        fileSize: file.bytes,
+        url: file.secure_url,
+        createdAt: file.created_at,
+        format: file.format,
+      };
+    });
 
     console.log(`📁 ${files.length} fichiers trouvés`);
     res.json(files);
@@ -144,48 +153,62 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 🗑️ Supprimer un fichier
-app.delete("/files/:id", async (req, res) => {
+// 📥 Télécharger un fichier - VERSION CORRIGÉE
+app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`🗑️ Suppression du fichier: ${id}`);
+    console.log(`📥 Téléchargement demandé: ${id}`);
 
-    const result = await cloudinary.uploader.destroy(id, {
-      resource_type: "raw",
-    });
-
-    if (result.result === "ok") {
-      io.emit("fileDeleted", { id });
-      res.json({ success: true, message: "Fichier supprimé" });
-    } else {
-      res.status(404).json({ error: "Fichier non trouvé" });
+    // 🔥 CORRECTION : Nettoyer l'ID
+    let cleanId = id;
+    if (cleanId.startsWith('files/')) {
+      cleanId = cleanId.replace('files/', '');
     }
 
+    // Vérifier que le fichier existe
+    const result = await cloudinary.api.resource(cleanId, { 
+      resource_type: "raw" 
+    });
+
+    // 🔥 Construire l'URL de téléchargement
+    const downloadUrl = cloudinary.url(cleanId, {
+      resource_type: "raw",
+      flags: "attachment",
+      display_name: result.display_name || cleanId.split("/").pop(),
+    });
+
+    console.log(`📥 Redirection vers: ${downloadUrl}`);
+    res.redirect(downloadUrl);
+
   } catch (err) {
-    console.error("❌ Erreur suppression:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Erreur téléchargement:", err);
+    res.status(404).json({ error: "Fichier non trouvé" });
   }
 });
 
-// Dans index.js (serveur)
+// 🗑️ Supprimer un fichier - VERSION CORRIGÉE
 app.delete("/files/:id", async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🗑️ Suppression du fichier: ${id}`);
 
-    // Vérifier que l'ID est valide
     if (!id) {
       return res.status(400).json({ error: "ID manquant" });
     }
 
-    const result = await cloudinary.uploader.destroy(id, {
+    // 🔥 CORRECTION : Nettoyer l'ID
+    let cleanId = id;
+    if (cleanId.startsWith('files/')) {
+      cleanId = cleanId.replace('files/', '');
+    }
+
+    const result = await cloudinary.uploader.destroy(cleanId, {
       resource_type: "raw",
     });
 
     if (result.result === "ok") {
-      // 🔥 ÉMETTRE L'ÉVÉNEMENT À TOUS LES CLIENTS
       io.emit("fileDeleted", { 
-        id: id,
+        id: cleanId,
         timestamp: new Date().toISOString(),
         deletedBy: req.ip || "unknown"
       });
@@ -198,30 +221,6 @@ app.delete("/files/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ Erreur suppression:", err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// 📥 Télécharger un fichier (redirection Cloudinary)
-app.get("/download/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`📥 Téléchargement demandé: ${id}`);
-
-    // Vérifier que le fichier existe
-    const result = await cloudinary.api.resource(id, { resource_type: "raw" });
-
-    // Rediriger vers l'URL Cloudinary
-    const downloadUrl = cloudinary.url(id, {
-      resource_type: "raw",
-      flags: "attachment",
-      display_name: result.display_name || id.split("/").pop(),
-    });
-
-    res.redirect(downloadUrl);
-
-  } catch (err) {
-    console.error("❌ Erreur téléchargement:", err);
-    res.status(404).json({ error: "Fichier non trouvé" });
   }
 });
 
