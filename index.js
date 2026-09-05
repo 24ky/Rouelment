@@ -175,29 +175,26 @@ app.get("/download/:id", async (req, res) => {
     
     console.log(`🔍 ID nettoyé: ${cleanId}`);
 
-    // 🔥 Récupérer le fichier
+    // 🔥 Récupérer les informations du fichier
     const result = await cloudinary.api.resource(cleanId, { 
       resource_type: "raw" 
     });
     
-    console.log(`✅ Fichier trouvé: ${result.public_id}`);
+    console.log(`✅ Fichier trouvé: ${result.public_id} (${result.bytes} bytes)`);
 
-    // 🔥 REDIRIGER VERS L'URL SÉCURISÉE
+    // 🔥 Construire l'URL de téléchargement signée
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
       display_name: result.display_name || cleanId.split("/").pop(),
-      secure: true
+      secure: true,
+      // 🔥 AJOUTER UNE SIGNATURE POUR L'AUTHENTIFICATION
+      sign_url: true
     });
 
     console.log(`📥 Redirection vers: ${downloadUrl}`);
     
-    // 🔥 Ajouter les headers CORS pour la redirection
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Expose-Headers', 'Location');
-    
-    // 🔥 Rediriger
+    // 🔥 Rediriger vers l'URL signée Cloudinary
     res.redirect(302, downloadUrl);
 
   } catch (err) {
