@@ -66,83 +66,57 @@ app.get("/health", (req, res) => {
   });
 });
 
-// 📤 Upload fichier - AVEC VÉRIFICATION DE TAILLE
+// 📤 Upload fichier - VERSION SIMPLIFIÉE
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
+    // Vérifier que le fichier existe
     if (!req.file) {
       return res.status(400).json({ error: "Aucun fichier sélectionné" });
     }
 
-    // 🔥 VÉRIFIER QUE LE FICHIER N'EST PAS VIDE
+    // 🔥 Vérifier la taille (Multer nous donne déjà req.file.size)
     if (req.file.size === 0) {
-      // Supprimer le fichier temporaire
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
+      // Nettoyer le fichier temporaire
+      if (req.file.path && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
       }
-      return res.status(400).json({ 
-        error: "Le fichier est vide (0 bytes). Veuillez sélectionner un fichier valide." 
-      });
+      return res.status(400).json({ error: "Le fichier est vide (0 bytes)" });
     }
 
-    const filePath = req.file.path;
     const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
-    const fileSize = req.file.size;
+    console.log(`📤 Upload: ${originalName} (${req.file.size} bytes)`);
 
-    console.log(`📤 Upload en cours: ${originalName} (${fileSize} bytes)`);
-
-    // 🔥 VÉRIFIER QUE LE FICHIER EST LISIBLE
-    try {
-      const stats = fs.statSync(filePath);
-      if (stats.size === 0) {
-        fs.unlinkSync(filePath);
-        return res.status(400).json({ error: "Le fichier est vide" });
-      }
-    } catch (statErr) {
-      console.error("❌ Erreur lecture fichier:", statErr);
-      return res.status(400).json({ error: "Impossible de lire le fichier" });
-    }
-
-    const uniqueId = `${Date.now()}-${uuidv4()}`;
-    
-    const result = await cloudinary.uploader.upload(filePath, {
+    // 🔥 Upload vers Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
       resource_type: "raw",
-      public_id: uniqueId,
+      public_id: `${Date.now()}-${uuidv4()}`,
       display_name: originalName,
     });
 
-    // Supprimer le fichier temporaire
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    // Nettoyer le fichier temporaire
+    if (req.file.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
 
     const fileData = {
       id: result.public_id,
       originalName: originalName,
-      fileSize,
+      fileSize: req.file.size,
       url: result.secure_url,
       createdAt: new Date().toISOString(),
     };
 
-    console.log(`✅ Fichier uploadé: ${originalName} (${result.public_id})`);
-
+    console.log(`✅ Upload réussi: ${originalName}`);
     io.emit("fileUploaded", fileData);
 
-    res.json({
-      success: true,
-      message: "Fichier uploadé avec succès",
-      file: fileData,
-    });
+    res.json({ success: true, file: fileData });
 
   } catch (err) {
     console.error("❌ Erreur upload:", err);
     
-    // Nettoyer le fichier temporaire en cas d'erreur
+    // Nettoyer en cas d'erreur
     if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (unlinkErr) {
-        console.error("Erreur nettoyage fichier:", unlinkErr);
-      }
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
     
     res.status(500).json({ error: err.message });
