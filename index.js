@@ -66,33 +66,58 @@ app.get("/health", (req, res) => {
   });
 });
 
-// 📤 Upload fichier - VERSION CORRIGÉE
+// 📤 Upload fichier - AVEC VÉRIFICATION DE TAILLE
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "Aucun fichier sélectionné" });
     }
 
+    // 🔥 VÉRIFIER QUE LE FICHIER N'EST PAS VIDE
+    if (req.file.size === 0) {
+      // Supprimer le fichier temporaire
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({ 
+        error: "Le fichier est vide (0 bytes). Veuillez sélectionner un fichier valide." 
+      });
+    }
+
     const filePath = req.file.path;
-    const originalName = req.file.originalname;
+    const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
     const fileSize = req.file.size;
 
     console.log(`📤 Upload en cours: ${originalName} (${fileSize} bytes)`);
 
-    // 🔥 CORRECTION : Utiliser un ID sans préfixe "files/"
+    // 🔥 VÉRIFIER QUE LE FICHIER EST LISIBLE
+    try {
+      const stats = fs.statSync(filePath);
+      if (stats.size === 0) {
+        fs.unlinkSync(filePath);
+        return res.status(400).json({ error: "Le fichier est vide" });
+      }
+    } catch (statErr) {
+      console.error("❌ Erreur lecture fichier:", statErr);
+      return res.status(400).json({ error: "Impossible de lire le fichier" });
+    }
+
     const uniqueId = `${Date.now()}-${uuidv4()}`;
     
     const result = await cloudinary.uploader.upload(filePath, {
       resource_type: "raw",
-      public_id: uniqueId,  // ✅ Plus de préfixe "files/"
+      public_id: uniqueId,
       display_name: originalName,
     });
 
-    fs.unlinkSync(filePath);
+    // Supprimer le fichier temporaire
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
 
     const fileData = {
       id: result.public_id,
-      originalName,
+      originalName: originalName,
       fileSize,
       url: result.secure_url,
       createdAt: new Date().toISOString(),
@@ -110,6 +135,16 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ Erreur upload:", err);
+    
+    // Nettoyer le fichier temporaire en cas d'erreur
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkErr) {
+        console.error("Erreur nettoyage fichier:", unlinkErr);
+      }
+    }
+    
     res.status(500).json({ error: err.message });
   }
 });
