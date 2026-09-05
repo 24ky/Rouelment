@@ -159,38 +159,52 @@ app.get("/download/:id", async (req, res) => {
     const { id } = req.params;
     console.log(`📥 Téléchargement demandé: ${id}`);
 
-    // 🔥 Nettoyer l'ID
+    // Nettoyer l'ID
     let cleanId = id;
     if (cleanId.startsWith('files/')) {
       cleanId = cleanId.replace('files/', '');
     }
 
-    // 🔥 Récupérer les informations du fichier
+    // Récupérer le fichier depuis Cloudinary
     const result = await cloudinary.api.resource(cleanId, { 
       resource_type: "raw" 
     });
 
-    // 🔥 Obtenir l'URL de téléchargement directe
+    // Construire l'URL de téléchargement
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
       display_name: result.display_name || cleanId.split("/").pop(),
     });
 
-    console.log(`📥 Redirection vers: ${downloadUrl}`);
+    console.log(`📥 Téléchargement via proxy: ${downloadUrl}`);
+
+    // 🔥 TÉLÉCHARGER LE FICHIER DEPUIS CLOUDINARY ET LE RETOURNER
+    const response = await fetch(downloadUrl);
+    const buffer = await response.arrayBuffer();
     
-    // 🔥 Ajouter les headers CORS pour le téléchargement
+    // Définir les headers pour le téléchargement
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.display_name || cleanId.split('/').pop())}"`);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
     
-    // 🔥 Rediriger vers Cloudinary
-    res.redirect(downloadUrl);
+    // Envoyer le fichier
+    res.send(Buffer.from(buffer));
 
   } catch (err) {
     console.error("❌ Erreur téléchargement:", err);
     res.status(404).json({ error: "Fichier non trouvé" });
   }
+});
+
+// 🔥 Ajouter OPTIONS pour le CORS preflight
+app.options("/download/:id", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  res.sendStatus(200);
 });
 
 // 🔥 Ajouter OPTIONS pour le CORS preflight
