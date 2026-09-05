@@ -207,22 +207,22 @@ app.get("/download/:id", async (req, res) => {
 });
 
 
-// 🔥 Ajouter OPTIONS pour le CORS preflight
-app.options("/download/:id", (req, res) => {
+// ==================== CORS CONFIGURATION ====================
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
+  exposedHeaders: ['Content-Disposition', 'Content-Length']
+}));
+
+// 🔥 Gérer les requêtes OPTIONS
+app.options('*', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
   res.sendStatus(200);
 });
-
-// 🔥 Ajouter OPTIONS pour le CORS preflight
-app.options("/download/:id", (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
-  res.sendStatus(200);
-});
-
 
 // 🗑️ Supprimer un fichier - VERSION CORRIGÉE
 app.delete("/files/:id", async (req, res) => {
