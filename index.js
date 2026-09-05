@@ -162,7 +162,7 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 📥 Télécharger un fichier - VERSION REDIRECTION
+// 📥 Télécharger un fichier
 app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -176,29 +176,58 @@ app.get("/download/:id", async (req, res) => {
     
     console.log(`🔍 ID nettoyé: ${cleanId}`);
 
-    // 🔥 Vérifier si le fichier existe
-    const result = await cloudinary.api.resource(cleanId, { 
-      resource_type: "raw" 
-    });
-    console.log(`✅ Fichier trouvé: ${result.public_id}`);
+    // 🔥 VÉRIFIER SI LE FICHIER EXISTE SUR CLOUDINARY
+    try {
+      const result = await cloudinary.api.resource(cleanId, { 
+        resource_type: "raw" 
+      });
+      console.log(`✅ Fichier trouvé sur Cloudinary:`, result.public_id);
+    } catch (checkErr) {
+      console.error(`❌ Fichier non trouvé sur Cloudinary: ${cleanId}`, checkErr);
+      return res.status(404).json({ 
+        error: "Fichier non trouvé sur Cloudinary",
+        id: cleanId
+      });
+    }
 
-    // 🔥 URL de téléchargement direct
+    // 🔥 Obtenir l'URL de téléchargement directe
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
-      display_name: result.display_name || cleanId.split("/").pop(),
+      display_name: cleanId.split("/").pop(),
     });
 
-    console.log(`📥 Redirection vers: ${downloadUrl}`);
+    console.log(`📥 URL de téléchargement: ${downloadUrl}`);
+
+    // 🔥 Télécharger le fichier depuis Cloudinary
+    const response = await fetch(downloadUrl);
     
-    // 🔥 Rediriger le client vers Cloudinary
-    res.redirect(downloadUrl);
+    if (!response.ok) {
+      console.error(`❌ Cloudinary error: ${response.status}`);
+      return res.status(404).json({ 
+        error: `Cloudinary error: ${response.status}` 
+      });
+    }
+
+    // 🔥 Récupérer le contenu binaire
+    const buffer = await response.arrayBuffer();
+
+    // 🔥 Définir les headers pour le téléchargement
+    const fileName = cleanId.split('/').pop();
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    
+    // 🔥 Envoyer le buffer binaire
+    res.send(Buffer.from(buffer));
 
   } catch (err) {
     console.error("❌ Erreur téléchargement:", err);
-    res.status(404).json({ 
-      error: "Fichier non trouvé",
-      id: req.params.id
+    res.status(500).json({ 
+      error: err.message,
+      stack: err.stack 
     });
   }
 });
