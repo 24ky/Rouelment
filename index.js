@@ -8,6 +8,11 @@ import { Server } from "socket.io";
 import cors from "cors";
 import { v2 as cloudinary } from "cloudinary";
 import { v4 as uuidv4 } from "uuid";
+import sanitize from "sanitize-filename";
+import axios from "axios";
+
+import admin from "firebase-admin";
+import { getApps } from "firebase-admin/app";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +23,26 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// ✅ Configuration Firebase Admin (notifications push FCM)
+// Nécessite la variable d'env FIREBASE_SERVICE_ACCOUNT (le JSON du compte de service, en une seule ligne)
+let fcmEnabled = false;
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const raw = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    if (raw.private_key) raw.private_key = raw.private_key.replace(/\\n/g, "\n");
+
+    if (!getApps().length) {
+      admin.initializeApp({ credential: admin.credential.cert(raw) });
+    }
+    fcmEnabled = true;
+    console.log("✅ Firebase Admin initialisé (notifications FCM actives)");
+  } else {
+    console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT non défini - notifications push désactivées");
+  }
+} catch (err) {
+  console.error("❌ Erreur init Firebase Admin:", err.message);
+}
 
 // ✅ Initialisation Express
 const app = express();
@@ -41,7 +66,8 @@ if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${file.originalname}`;
+    const safeName = sanitize(file.originalname) || "fichier";
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}`;
     cb(null, unique);
   },
 });
@@ -55,7 +81,41 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 50 * 1024 * 1024 } });
 
+// ✅ Envoi d'une notification push à tous les appareils abonnés au topic "allUsers"
+// C'est ce qui permet de recevoir une notif même quand l'app est en arrière-plan / fermée.
+async function sendNotificationToAll(title, body, fileData = null) {
+  if (!fcmEnabled) {
+    console.warn("⚠️ FCM désactivé - notification non envoyée");
+    return;
+  }
+  const message = {
+    topic: "allUsers",
+    notification: { title, body },
+    data: fileData ? { fileData: JSON.stringify(fileData) } : {},
+  };
+  try {
+    const response = await admin.messaging().send(message);
+    console.log("✅ Notification FCM envoyée :", response);
+  } catch (error) {
+    console.error("❌ Erreur FCM :", error.message);
+  }
+}
+
 // ==================== ENDPOINTS ====================
+
+// 🏠 Route racine / dashboard optionnel
+app.get("/", (req, res) => {
+  const dashboardPath = path.join(__dirname, "dashboard.html");
+  if (fs.existsSync(dashboardPath)) {
+    res.sendFile(dashboardPath);
+  } else {
+    res.json({
+      status: "Serveur en ligne",
+      cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
+      fcm: fcmEnabled,
+    });
+  }
+});
 
 // 🏥 Health check
 app.get("/health", (req, res) => {
@@ -63,10 +123,11 @@ app.get("/health", (req, res) => {
     status: "ok",
     timestamp: new Date().toISOString(),
     cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
+    fcm: fcmEnabled,
   });
 });
 
-// 📤 Upload fichier - VERSION SIMPLIFIÉE
+// 📤 Upload fichier
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
     // Vérifier que le fichier existe
@@ -74,9 +135,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Aucun fichier sélectionné" });
     }
 
-    // 🔥 Vérifier la taille (Multer nous donne déjà req.file.size)
+    // Vérifier la taille
     if (req.file.size === 0) {
-      // Nettoyer le fichier temporaire
       if (req.file.path && fs.existsSync(req.file.path)) {
         try { fs.unlinkSync(req.file.path); } catch (e) {}
       }
@@ -86,7 +146,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
     console.log(`📤 Upload: ${originalName} (${req.file.size} bytes)`);
 
-    // 🔥 Upload vers Cloudinary
+    // Upload vers Cloudinary
     const result = await cloudinary.uploader.upload(req.file.path, {
       resource_type: "raw",
       public_id: `${Date.now()}-${uuidv4()}`,
@@ -107,24 +167,29 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     };
 
     console.log(`✅ Upload réussi: ${originalName}`);
+
+    // 🔔 Notification push FCM (arrive même app en arrière-plan / fermée)
+    await sendNotificationToAll("Nouveau fichier reçu", `"${originalName}"`, fileData);
+
+    // 🔌 Notification temps réel Socket.io (app ouverte au premier plan)
     io.emit("fileUploaded", fileData);
 
     res.json({ success: true, file: fileData });
 
   } catch (err) {
     console.error("❌ Erreur upload:", err);
-    
+
     // Nettoyer en cas d'erreur
     if (req.file && req.file.path && fs.existsSync(req.file.path)) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
-    
+
     res.status(500).json({ error: err.message });
   }
 });
 
 
-// 📋 Liste des fichiers - VERSION CORRIGÉE
+// 📋 Liste des fichiers
 app.get("/files", async (req, res) => {
   try {
     console.log("📁 Récupération de la liste des fichiers...");
@@ -132,16 +197,15 @@ app.get("/files", async (req, res) => {
     const result = await cloudinary.api.resources({
       resource_type: "raw",
       type: "upload",
-      max_results: 500,  // ✅ Plus de préfixe
+      max_results: 500,
     });
 
     const files = result.resources.map(file => {
-      // 🔥 Extraire l'ID sans le préfixe "files/" si présent
       let cleanId = file.public_id;
       if (cleanId.startsWith('files/')) {
         cleanId = cleanId.replace('files/', '');
       }
-      
+
       return {
         id: cleanId,
         storedAs: cleanId,
@@ -172,17 +236,15 @@ app.get("/download/:id", async (req, res) => {
     if (cleanId.startsWith('files/')) {
       cleanId = cleanId.replace('files/', '');
     }
-    
+
     console.log(`🔍 ID nettoyé: ${cleanId}`);
 
-    // 🔥 Récupérer les informations du fichier
-    const result = await cloudinary.api.resource(cleanId, { 
-      resource_type: "raw" 
+    const result = await cloudinary.api.resource(cleanId, {
+      resource_type: "raw"
     });
-    
+
     console.log(`✅ Fichier trouvé: ${result.public_id} (${result.bytes} bytes)`);
 
-    // 🔥 Construire l'URL de téléchargement
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
@@ -192,40 +254,37 @@ app.get("/download/:id", async (req, res) => {
 
     console.log(`📥 Téléchargement depuis: ${downloadUrl}`);
 
-    // 🔥 TÉLÉCHARGER LE FICHIER VIA LE SERVEUR
     const response = await fetch(downloadUrl, {
       headers: {
         'User-Agent': 'PCC-Assistant/1.0',
         'Accept': 'application/octet-stream, */*'
       }
     });
-    
+
     if (!response.ok) {
       console.error(`❌ Erreur Cloudinary: ${response.status}`);
-      return res.status(response.status).json({ 
+      return res.status(response.status).json({
         error: `Erreur Cloudinary: ${response.status}`,
         id: cleanId
       });
     }
 
-    // 🔥 Récupérer le contenu binaire
     const buffer = await response.arrayBuffer();
     const fileName = result.display_name || cleanId.split('/').pop();
 
-    // 🔥 Envoyer le fichier au client
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
     res.setHeader('Content-Length', buffer.byteLength);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    
+
     console.log(`📥 Envoi: ${fileName} (${buffer.byteLength} bytes)`);
     res.send(Buffer.from(buffer));
 
   } catch (err) {
     console.error("❌ Erreur:", err);
-    res.status(404).json({ 
+    res.status(404).json({
       error: "Fichier non trouvé",
       details: err.message,
       id: req.params.id
@@ -241,7 +300,6 @@ app.use(cors({
   exposedHeaders: ['Content-Disposition', 'Content-Length']
 }));
 
-// 🔥 Gérer les requêtes OPTIONS
 app.options('*', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -250,7 +308,7 @@ app.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
-// 🗑️ Supprimer un fichier - VERSION CORRIGÉE
+// 🗑️ Supprimer un fichier
 app.delete("/files/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -260,7 +318,6 @@ app.delete("/files/:id", async (req, res) => {
       return res.status(400).json({ error: "ID manquant" });
     }
 
-    // 🔥 CORRECTION : Nettoyer l'ID
     let cleanId = id;
     if (cleanId.startsWith('files/')) {
       cleanId = cleanId.replace('files/', '');
@@ -271,12 +328,12 @@ app.delete("/files/:id", async (req, res) => {
     });
 
     if (result.result === "ok") {
-      io.emit("fileDeleted", { 
+      io.emit("fileDeleted", {
         id: cleanId,
         timestamp: new Date().toISOString(),
         deletedBy: req.ip || "unknown"
       });
-      
+
       res.json({ success: true, message: "Fichier supprimé" });
     } else {
       res.status(404).json({ error: "Fichier non trouvé" });
@@ -309,4 +366,28 @@ app.get("/ping", (req, res) => {
 httpServer.listen(PORT, () => {
   console.log(`🚀 Serveur lancé sur le port ${PORT}`);
   console.log(`📁 Cloudinary: ${process.env.CLOUDINARY_CLOUD_NAME ? "✅" : "❌"}`);
+  console.log(`🔔 FCM: ${fcmEnabled ? "✅" : "❌"}`);
 });
+
+// ==================== KEEP-ALIVE (anti-veille Render) ====================
+// Render fournit automatiquement RENDER_EXTERNAL_URL sur les services web.
+// Sinon, tu peux définir toi-même SELF_PING_URL dans les variables d'environnement.
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || process.env.SELF_PING_URL;
+
+if (SELF_URL) {
+  async function keepAlive() {
+    try {
+      const res = await axios.get(`${SELF_URL}/health`, { timeout: 10000 });
+      console.log(`🏓 Keep-alive OK - Status: ${res.status}`);
+    } catch (err) {
+      console.error(`❌ Keep-alive échoué: ${err.message}`);
+    }
+    // Entre 4 et 7 minutes, toujours sous le seuil de 15 min de mise en veille de Render
+    const delay = Math.floor(Math.random() * (7 - 4 + 1) + 4) * 60 * 1000;
+    console.log(`🕒 Prochain keep-alive dans ${(delay / 60000).toFixed(1)} min`);
+    setTimeout(keepAlive, delay);
+  }
+  keepAlive();
+} else {
+  console.warn("⚠️ RENDER_EXTERNAL_URL / SELF_PING_URL non défini - le serveur peut se mettre en veille (plan gratuit Render), causant un premier appel lent après inactivité.");
+}
