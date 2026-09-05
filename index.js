@@ -162,7 +162,7 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 📥 Télécharger un fichier
+// 📥 Télécharger un fichier - SOLUTION ULTIME
 app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -176,58 +176,81 @@ app.get("/download/:id", async (req, res) => {
     
     console.log(`🔍 ID nettoyé: ${cleanId}`);
 
-    // 🔥 VÉRIFIER SI LE FICHIER EXISTE SUR CLOUDINARY
+    // 🔥 Vérifier que le fichier existe
+    let fileInfo;
     try {
-      const result = await cloudinary.api.resource(cleanId, { 
+      fileInfo = await cloudinary.api.resource(cleanId, { 
         resource_type: "raw" 
       });
-      console.log(`✅ Fichier trouvé sur Cloudinary:`, result.public_id);
-    } catch (checkErr) {
-      console.error(`❌ Fichier non trouvé sur Cloudinary: ${cleanId}`, checkErr);
+    } catch (err) {
+      console.error(`❌ Fichier non trouvé: ${cleanId}`);
       return res.status(404).json({ 
         error: "Fichier non trouvé sur Cloudinary",
         id: cleanId
       });
     }
+    
+    console.log(`✅ Fichier trouvé: ${fileInfo.public_id} (${fileInfo.bytes} bytes)`);
 
-    // 🔥 Obtenir l'URL de téléchargement directe
-    const downloadUrl = cloudinary.url(cleanId, {
-      resource_type: "raw",
-      flags: "attachment",
-      display_name: cleanId.split("/").pop(),
+    // 🔥 Télécharger via l'API Cloudinary avec authentification
+    const apiUrl = `https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/raw/upload/${cleanId}`;
+    
+    const auth = Buffer.from(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`).toString('base64');
+    
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/octet-stream',
+        'User-Agent': 'PCC-Assistant/1.0'
+      }
     });
-
-    console.log(`📥 URL de téléchargement: ${downloadUrl}`);
-
-    // 🔥 Télécharger le fichier depuis Cloudinary
-    const response = await fetch(downloadUrl);
     
     if (!response.ok) {
-      console.error(`❌ Cloudinary error: ${response.status}`);
-      return res.status(404).json({ 
-        error: `Cloudinary error: ${response.status}` 
-      });
+      console.error(`❌ Cloudinary API error: ${response.status}`);
+      throw new Error(`Cloudinary API error: ${response.status}`);
     }
 
     // 🔥 Récupérer le contenu binaire
     const buffer = await response.arrayBuffer();
 
     // 🔥 Définir les headers pour le téléchargement
-    const fileName = cleanId.split('/').pop();
+    const fileName = fileInfo.display_name || cleanId.split('/').pop();
+    const fileSize = buffer.byteLength;
+    
+    // Headers de sécurité et de performance
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-    res.setHeader('Content-Length', buffer.byteLength);
+    res.setHeader('Content-Length', fileSize);
+    res.setHeader('Content-Transfer-Encoding', 'binary');
+    
+    // Headers CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
+    
+    // Headers de cache (optionnel)
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('ETag', `"${fileInfo.public_id}"`);
+    
+    console.log(`📥 Envoi du fichier: ${fileName} (${fileSize} bytes)`);
     
     // 🔥 Envoyer le buffer binaire
     res.send(Buffer.from(buffer));
 
   } catch (err) {
     console.error("❌ Erreur téléchargement:", err);
+    
+    // 🔥 Journaliser l'erreur complète
+    console.error({
+      message: err.message,
+      stack: err.stack,
+      id: req.params.id
+    });
+    
     res.status(500).json({ 
-      error: err.message,
-      stack: err.stack 
+      error: "Erreur lors du téléchargement",
+      details: err.message,
+      id: req.params.id
     });
   }
 });
