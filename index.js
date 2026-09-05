@@ -165,32 +165,39 @@ app.get("/download/:id", async (req, res) => {
       cleanId = cleanId.replace('files/', '');
     }
 
-    // Récupérer le fichier depuis Cloudinary
+    // 🔥 Récupérer les informations du fichier depuis Cloudinary
     const result = await cloudinary.api.resource(cleanId, { 
       resource_type: "raw" 
     });
 
-    // Construire l'URL de téléchargement
+    // 🔥 Obtenir l'URL de téléchargement directe
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
       display_name: result.display_name || cleanId.split("/").pop(),
     });
 
-    console.log(`📥 Téléchargement via proxy: ${downloadUrl}`);
+    console.log(`📥 Téléchargement depuis: ${downloadUrl}`);
 
-    // 🔥 TÉLÉCHARGER LE FICHIER DEPUIS CLOUDINARY ET LE RETOURNER
+    // 🔥 Télécharger le fichier depuis Cloudinary
     const response = await fetch(downloadUrl);
-    const buffer = await response.arrayBuffer();
     
-    // Définir les headers pour le téléchargement
+    if (!response.ok) {
+      throw new Error(`Cloudinary error: ${response.status}`);
+    }
+
+    // 🔥 Récupérer le contenu binaire
+    const buffer = await response.arrayBuffer();
+
+    // 🔥 Définir les headers pour le téléchargement
+    const fileName = result.display_name || cleanId.split('/').pop();
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.display_name || cleanId.split('/').pop())}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
     
-    // Envoyer le fichier
+    // 🔥 Envoyer le buffer binaire
     res.send(Buffer.from(buffer));
 
   } catch (err) {
@@ -198,6 +205,7 @@ app.get("/download/:id", async (req, res) => {
     res.status(404).json({ error: "Fichier non trouvé" });
   }
 });
+
 
 // 🔥 Ajouter OPTIONS pour le CORS preflight
 app.options("/download/:id", (req, res) => {
