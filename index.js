@@ -153,24 +153,24 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 📥 Télécharger un fichier - VERSION CORRIGÉE
+// 📥 Télécharger un fichier 
 app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`📥 Téléchargement demandé: ${id}`);
 
-    // 🔥 CORRECTION : Nettoyer l'ID
+    // 🔥 Nettoyer l'ID
     let cleanId = id;
     if (cleanId.startsWith('files/')) {
       cleanId = cleanId.replace('files/', '');
     }
 
-    // Vérifier que le fichier existe
+    // 🔥 Récupérer les informations du fichier
     const result = await cloudinary.api.resource(cleanId, { 
       resource_type: "raw" 
     });
 
-    // 🔥 Construire l'URL de téléchargement
+    // 🔥 Obtenir l'URL de téléchargement directe
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
@@ -178,6 +178,13 @@ app.get("/download/:id", async (req, res) => {
     });
 
     console.log(`📥 Redirection vers: ${downloadUrl}`);
+    
+    // 🔥 Ajouter les headers CORS pour le téléchargement
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+    
+    // 🔥 Rediriger vers Cloudinary
     res.redirect(downloadUrl);
 
   } catch (err) {
@@ -185,6 +192,15 @@ app.get("/download/:id", async (req, res) => {
     res.status(404).json({ error: "Fichier non trouvé" });
   }
 });
+
+// 🔥 Ajouter OPTIONS pour le CORS preflight
+app.options("/download/:id", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  res.sendStatus(200);
+});
+
 
 // 🗑️ Supprimer un fichier - VERSION CORRIGÉE
 app.delete("/files/:id", async (req, res) => {
