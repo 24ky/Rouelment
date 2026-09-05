@@ -162,13 +162,12 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 📥 Télécharger un fichier - SOLUTION ULTIME
+// 📥 Télécharger un fichier - REDIRECTION VERS L'URL SÉCURISÉE
 app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`📥 Téléchargement demandé: ${id}`);
 
-    // Nettoyer l'ID
     let cleanId = id;
     if (cleanId.startsWith('files/')) {
       cleanId = cleanId.replace('files/', '');
@@ -176,85 +175,39 @@ app.get("/download/:id", async (req, res) => {
     
     console.log(`🔍 ID nettoyé: ${cleanId}`);
 
-    // 🔥 Vérifier que le fichier existe
-    let fileInfo;
-    try {
-      fileInfo = await cloudinary.api.resource(cleanId, { 
-        resource_type: "raw" 
-      });
-    } catch (err) {
-      console.error(`❌ Fichier non trouvé: ${cleanId}`);
-      return res.status(404).json({ 
-        error: "Fichier non trouvé sur Cloudinary",
-        id: cleanId
-      });
-    }
-    
-    console.log(`✅ Fichier trouvé: ${fileInfo.public_id} (${fileInfo.bytes} bytes)`);
-
-    // 🔥 Télécharger via l'API Cloudinary avec authentification
-    const apiUrl = `https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/raw/upload/${cleanId}`;
-    
-    const auth = Buffer.from(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`).toString('base64');
-    
-    const response = await fetch(apiUrl, {
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'Accept': 'application/octet-stream',
-        'User-Agent': 'PCC-Assistant/1.0'
-      }
+    // 🔥 Récupérer le fichier
+    const result = await cloudinary.api.resource(cleanId, { 
+      resource_type: "raw" 
     });
     
-    if (!response.ok) {
-      console.error(`❌ Cloudinary API error: ${response.status}`);
-      throw new Error(`Cloudinary API error: ${response.status}`);
-    }
+    console.log(`✅ Fichier trouvé: ${result.public_id}`);
 
-    // 🔥 Récupérer le contenu binaire
-    const buffer = await response.arrayBuffer();
+    // 🔥 REDIRIGER VERS L'URL SÉCURISÉE
+    const downloadUrl = cloudinary.url(cleanId, {
+      resource_type: "raw",
+      flags: "attachment",
+      display_name: result.display_name || cleanId.split("/").pop(),
+      secure: true
+    });
 
-    // 🔥 Définir les headers pour le téléchargement
-    const fileName = fileInfo.display_name || cleanId.split('/').pop();
-    const fileSize = buffer.byteLength;
+    console.log(`📥 Redirection vers: ${downloadUrl}`);
     
-    // Headers de sécurité et de performance
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-    res.setHeader('Content-Length', fileSize);
-    res.setHeader('Content-Transfer-Encoding', 'binary');
-    
-    // Headers CORS
+    // 🔥 Ajouter les headers CORS pour la redirection
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
+    res.setHeader('Access-Control-Expose-Headers', 'Location');
     
-    // Headers de cache (optionnel)
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.setHeader('ETag', `"${fileInfo.public_id}"`);
-    
-    console.log(`📥 Envoi du fichier: ${fileName} (${fileSize} bytes)`);
-    
-    // 🔥 Envoyer le buffer binaire
-    res.send(Buffer.from(buffer));
+    // 🔥 Rediriger
+    res.redirect(302, downloadUrl);
 
   } catch (err) {
-    console.error("❌ Erreur téléchargement:", err);
-    
-    // 🔥 Journaliser l'erreur complète
-    console.error({
-      message: err.message,
-      stack: err.stack,
-      id: req.params.id
-    });
-    
-    res.status(500).json({ 
-      error: "Erreur lors du téléchargement",
-      details: err.message,
+    console.error("❌ Erreur:", err);
+    res.status(404).json({ 
+      error: "Fichier non trouvé",
       id: req.params.id
     });
   }
 });
-
 
 // ==================== CORS CONFIGURATION ====================
 app.use(cors({
