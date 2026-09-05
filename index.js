@@ -162,7 +162,7 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 📥 Télécharger un fichier - REDIRECTION VERS L'URL SÉCURISÉE
+// 📥 Télécharger un fichier - VERSION PROXY BINAIRE
 app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -182,25 +182,52 @@ app.get("/download/:id", async (req, res) => {
     
     console.log(`✅ Fichier trouvé: ${result.public_id} (${result.bytes} bytes)`);
 
-    // 🔥 Construire l'URL de téléchargement signée
+    // 🔥 Construire l'URL de téléchargement
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
       display_name: result.display_name || cleanId.split("/").pop(),
-      secure: true,
-      // 🔥 AJOUTER UNE SIGNATURE POUR L'AUTHENTIFICATION
-      sign_url: true
+      secure: true
     });
 
-    console.log(`📥 Redirection vers: ${downloadUrl}`);
+    console.log(`📥 Téléchargement depuis: ${downloadUrl}`);
+
+    // 🔥 TÉLÉCHARGER LE FICHIER VIA LE SERVEUR
+    const response = await fetch(downloadUrl, {
+      headers: {
+        'User-Agent': 'PCC-Assistant/1.0',
+        'Accept': 'application/octet-stream, */*'
+      }
+    });
     
-    // 🔥 Rediriger vers l'URL signée Cloudinary
-    res.redirect(302, downloadUrl);
+    if (!response.ok) {
+      console.error(`❌ Erreur Cloudinary: ${response.status}`);
+      return res.status(response.status).json({ 
+        error: `Erreur Cloudinary: ${response.status}`,
+        id: cleanId
+      });
+    }
+
+    // 🔥 Récupérer le contenu binaire
+    const buffer = await response.arrayBuffer();
+    const fileName = result.display_name || cleanId.split('/').pop();
+
+    // 🔥 Envoyer le fichier au client
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    
+    console.log(`📥 Envoi: ${fileName} (${buffer.byteLength} bytes)`);
+    res.send(Buffer.from(buffer));
 
   } catch (err) {
     console.error("❌ Erreur:", err);
     res.status(404).json({ 
       error: "Fichier non trouvé",
+      details: err.message,
       id: req.params.id
     });
   }
