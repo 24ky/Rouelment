@@ -162,7 +162,7 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 📥 Télécharger un fichier 
+// 📥 Télécharger un fichier - VERSION REDIRECTION
 app.get("/download/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -173,45 +173,33 @@ app.get("/download/:id", async (req, res) => {
     if (cleanId.startsWith('files/')) {
       cleanId = cleanId.replace('files/', '');
     }
+    
+    console.log(`🔍 ID nettoyé: ${cleanId}`);
 
-    // 🔥 Récupérer les informations du fichier depuis Cloudinary
+    // 🔥 Vérifier si le fichier existe
     const result = await cloudinary.api.resource(cleanId, { 
       resource_type: "raw" 
     });
+    console.log(`✅ Fichier trouvé: ${result.public_id}`);
 
-    // 🔥 Obtenir l'URL de téléchargement directe
+    // 🔥 URL de téléchargement direct
     const downloadUrl = cloudinary.url(cleanId, {
       resource_type: "raw",
       flags: "attachment",
       display_name: result.display_name || cleanId.split("/").pop(),
     });
 
-    console.log(`📥 Téléchargement depuis: ${downloadUrl}`);
-
-    // 🔥 Télécharger le fichier depuis Cloudinary
-    const response = await fetch(downloadUrl);
+    console.log(`📥 Redirection vers: ${downloadUrl}`);
     
-    if (!response.ok) {
-      throw new Error(`Cloudinary error: ${response.status}`);
-    }
-
-    // 🔥 Récupérer le contenu binaire
-    const buffer = await response.arrayBuffer();
-
-    // 🔥 Définir les headers pour le téléchargement
-    const fileName = result.display_name || cleanId.split('/').pop();
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-    res.setHeader('Content-Length', buffer.byteLength);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    
-    // 🔥 Envoyer le buffer binaire
-    res.send(Buffer.from(buffer));
+    // 🔥 Rediriger le client vers Cloudinary
+    res.redirect(downloadUrl);
 
   } catch (err) {
     console.error("❌ Erreur téléchargement:", err);
-    res.status(404).json({ error: "Fichier non trouvé" });
+    res.status(404).json({ 
+      error: "Fichier non trouvé",
+      id: req.params.id
+    });
   }
 });
 
